@@ -1,8 +1,11 @@
-// Demo file with intentional bug
+// Demo file - now fixed
 function calculateTotal(items) {
   let total = 0;
   for (let item of items) {
-    total += item.price; // Bug: accessing .price without checking if it exists
+    // FIX: Added null check before accessing price
+    if (item && typeof item.price === 'number') {
+      total += item.price;
+    }
   }
   return total;
 }
