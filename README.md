@@ -8,10 +8,10 @@ Transform unstructured code review feedback into structured learning data for AI
 
 ```bash
 # Install globally
-npm install -g @halogen-labs/strike-logger
+npm install -g @halonic/strike-logger
 
 # Or use with npx
-npx @halogen-labs/strike-logger init
+npx @halonic/strike-logger init
 ```
 
 ## 📖 Usage
@@ -183,12 +183,12 @@ strike-logger/
 
 ## 📄 License
 
-MIT © Halogen Labs
+MIT © Halonic
 
 ## 🤝 Contributing
 
-Contributions welcome! This is an open-source project from [Halogen Labs](https://github.com/halogen-labs).
+Contributions welcome! This is an open-source project from [Halonic](https://github.com/halonic).
 
 ---
 
-**Built with ❤️ by Halogen Labs** | [Report Issues](https://github.com/halogen-labs/strike-logger/issues)
+**Built with ❤️ by Halonic** | [Report Issues](https://github.com/halonic/strike-logger/issues)

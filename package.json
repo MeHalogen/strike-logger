@@ -1,5 +1,5 @@
 {
-  "name": "@halogen-labs/strike-logger",
+  "name": "@halonic/strike-logger",
   "version": "0.1.0",
   "description": "AI Code Review Strike Logger - Track and categorize AI-generated code errors",
   "main": "dist/index.js",
@@ -23,13 +23,13 @@
     "git",
     "cli",
     "strike-logger",
-    "halogen-labs"
+    "halonic"
   ],
-  "author": "Halogen Labs <hello@halogenlabs.dev>",
+  "author": "Halonic <hello@halonic.dev>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/halogen-labs/strike-logger.git"
+    "url": "https://github.com/halonic/strike-logger.git"
   },
   "engines": {
     "node": ">=18.0.0"

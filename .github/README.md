@@ -5,7 +5,7 @@ AI Code Review Strike Logger - Track and categorize AI-generated code errors to 
 ## 🚀 Quick Start
 
 ```bash
-npm install -g @halogen-labs/strike-logger
+npm install -g @halonic/strike-logger
 strike-logger init
 ```
 
@@ -13,9 +13,9 @@ strike-logger init
 
 See [README.md](README.md) for full documentation.
 
-## 🏢 About Halogen Labs
+## 🏢 About Halonic
 
-Built by [Halogen Labs](https://github.com/halogen-labs) - AI-powered developer tools.
+Built by [Halonic](https://github.com/halonic) - AI-powered developer tools.
 
 ## 📄 License
 
