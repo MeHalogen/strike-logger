@@ -6,15 +6,18 @@ import ora from 'ora';
 import { initDatabase, addStrike, getAllStrikes, getStatistics } from './database/strike-log.js';
 import { isGitRepo, getCommitDiff, getRecentFixCommits } from './parsers/git-parser.js';
 import { categorizeByRules, suggestSeverity } from './categorizer/rules.js';
-import { StrikeCategory } from './database/schema.js';
+import { StrikeCategory, StrikeSeverity } from './database/schema.js';
 import { generateAntiPatterns } from './templates/generator.js';
+import { promptCommitStrike } from './interactive/prompter.js';
+import { injectAntiPatternsIntoWorkspace } from './templates/injector.js';
+import { registerPreCommitHook, unregisterPreCommitHook, checkStagedChanges } from './hooks/hook-manager.js';
 
 const program = new Command();
 
 program
   .name('strike-logger')
   .description('AI Code Review Strike Logger - Track and categorize AI-generated code errors')
-  .version('0.1.0');
+  .version('0.2.0');
 
 /**
  * Init command - Initialize strike database
@@ -60,6 +63,7 @@ program
   .option('--severity <severity>', 'Severity level (low|medium|high|critical)')
   .option('--message <message>', 'Description of the error')
   .option('--auto', 'Auto-detect strikes from recent fix commits')
+  .option('-i, --interactive', 'Interactively review and select strikes to log')
   .option('-p, --path <path>', 'Database path', './data/strikes.json')
   .action(async (options) => {
     try {
@@ -79,7 +83,7 @@ program
           return;
         }
 
-        spinner.text = `Found ${fixCommits.length} fix commits. Analyzing...`;
+        spinner.succeed(`Found ${fixCommits.length} fix commits.`);
         
         let logged = 0;
         for (const commit of fixCommits) {
@@ -89,70 +93,94 @@ program
           const category = categorizeByRules(diff.message, diff.files[0]?.changes);
           const severity = suggestSeverity(category, diff.message);
 
-          await addStrike(
-            {
-              category,
-              severity,
-              source: {
-                commit,
-                file: diff.files[0]?.file || 'unknown',
-                lines: [1, 1],
-                diff: diff.files[0]?.changes || '',
+          if (options.interactive) {
+            const strikeData = await promptCommitStrike(diff, category, severity);
+            if (strikeData) {
+              await addStrike(strikeData, options.path);
+              logged++;
+            }
+          } else {
+            await addStrike(
+              {
+                category,
+                severity,
+                source: {
+                  commit,
+                  file: diff.files[0]?.file || 'unknown',
+                  lines: [1, 1] as [number, number],
+                  diff: diff.files[0]?.changes || '',
+                },
+                description: diff.message,
+                tags: ['auto-detected'],
+                resolved: false,
               },
-              description: diff.message,
-              tags: ['auto-detected'],
-              resolved: false,
-            },
-            options.path
-          );
-          logged++;
+              options.path
+            );
+            logged++;
+          }
         }
 
-        spinner.succeed(chalk.green(`Logged ${logged} strikes from recent commits`));
+        console.log(chalk.green(`\nLogged ${logged} strikes from recent commits`));
         return;
       }
 
       // Manual mode
-      if (!options.commit || !options.message) {
-        console.error(chalk.red('Error: --commit and --message are required (or use --auto)'));
+      if (!options.commit) {
+        console.error(chalk.red('Error: --commit is required (or use --auto)'));
         process.exit(1);
       }
-
-      const spinner = ora('Logging strike...').start();
 
       const diff = await getCommitDiff(options.commit);
       if (!diff) {
-        spinner.fail(chalk.red(`Failed to get diff for commit ${options.commit}`));
+        console.error(chalk.red(`Failed to get diff for commit ${options.commit}`));
         process.exit(1);
       }
 
+      const defaultMessage = options.message || diff.message;
       const category = options.category 
         ? (options.category as StrikeCategory)
-        : categorizeByRules(options.message, diff.files[0]?.changes);
+        : categorizeByRules(defaultMessage, diff.files[0]?.changes);
       
-      const severity = options.severity || suggestSeverity(category, options.message);
+      const severity = options.severity || suggestSeverity(category, defaultMessage);
 
-      const strike = await addStrike(
-        {
+      let strikeData;
+      if (options.interactive) {
+        strikeData = await promptCommitStrike(
+          diff,
           category,
-          severity: severity as any,
+          severity as StrikeSeverity
+        );
+        if (!strikeData) {
+          console.log(chalk.gray('Cancelled.'));
+          return;
+        }
+      } else {
+        if (!options.message) {
+          console.error(chalk.red('Error: --message is required for non-interactive manual logging'));
+          process.exit(1);
+        }
+        strikeData = {
+          category,
+          severity: severity as StrikeSeverity,
           source: {
             commit: options.commit,
             file: diff.files[0]?.file || 'unknown',
-            lines: [1, 1],
+            lines: [1, 1] as [number, number],
             diff: diff.files[0]?.changes || '',
           },
           description: options.message,
           tags: [],
           resolved: false,
-        },
-        options.path
-      );
+        };
+      }
+
+      const spinner = ora('Logging strike...').start();
+      const strike = await addStrike(strikeData, options.path);
 
       spinner.succeed(chalk.green('Strike logged successfully!'));
       console.log(chalk.blue(`\nStrike ID: ${strike.id}`));
-      console.log(chalk.gray(`Category: ${category}`));
-      console.log(chalk.gray(`Severity: ${severity}\n`));
+      console.log(chalk.gray(`Category: ${strike.category}`));
+      console.log(chalk.gray(`Severity: ${strike.severity}\n`));
     } catch (error) {
       console.error(chalk.red('Error logging strike:'), error);
       process.exit(1);
@@ -248,6 +276,82 @@ program
       }
     } catch (error) {
       console.error(chalk.red('Error generating template:'), error);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Inject command - Scan and auto-inject anti-patterns into workspace files
+ */
+program
+  .command('inject')
+  .description('Scan workspace for spec files and auto-inject anti-pattern rules')
+  .option('-p, --path <path>', 'Database path', './data/strikes.json')
+  .option('-d, --dir <dir>', 'Target workspace directory', process.cwd())
+  .action(async (options) => {
+    const spinner = ora('Scanning and injecting anti-patterns...').start();
+    try {
+      const strikes = await getAllStrikes(options.path);
+      if (strikes.length === 0) {
+        spinner.warn('No strikes found. Log some strikes first!');
+        return;
+      }
+
+      const updated = await injectAntiPatternsIntoWorkspace(strikes, options.dir);
+      if (updated.length > 0) {
+        spinner.succeed(chalk.green(`Successfully updated/created spec files: ${updated.join(', ')}`));
+      } else {
+        spinner.info('No active spec files found to update.');
+      }
+    } catch (error) {
+      spinner.fail(chalk.red('Failed to inject anti-patterns'));
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Hook command - Manage or run the git pre-commit hook safeguard
+ */
+program
+  .command('hook')
+  .description('Manage or run the git pre-commit hook safeguard')
+  .option('--register', 'Register pre-commit hook in local .git repository')
+  .option('--unregister', 'Unregister pre-commit hook')
+  .option('--check', 'Run anti-pattern checks on staged files (used by git hook)')
+  .option('-p, --path <path>', 'Database path', './data/strikes.json')
+  .action(async (options) => {
+    try {
+      if (options.register) {
+        const success = await registerPreCommitHook();
+        if (success) {
+          console.log(chalk.green('Successfully registered pre-commit hook in .git/hooks/pre-commit'));
+        } else {
+          process.exit(1);
+        }
+        return;
+      }
+      if (options.unregister) {
+        const success = await unregisterPreCommitHook();
+        if (success) {
+          console.log(chalk.green('Successfully unregistered pre-commit hook'));
+        } else {
+          process.exit(1);
+        }
+        return;
+      }
+      if (options.check) {
+        const clean = await checkStagedChanges(options.path);
+        if (!clean) {
+          process.exit(1);
+        }
+        console.log(chalk.green('✔ No recurring anti-patterns found in staged changes.'));
+        return;
+      }
+      console.error(chalk.red('Error: Please specify --register, --unregister, or --check'));
+      process.exit(1);
+    } catch (error) {
+      console.error(chalk.red('Hook command failed:'), error);
       process.exit(1);
     }
   });
