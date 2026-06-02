@@ -31,6 +31,26 @@ strike-logger log --commit abc123 --message "Missing error handling in API call"
 
 # Auto-detect from recent fix commits
 strike-logger log --auto
+
+# Interactive selection and review
+strike-logger log --auto --interactive
+```
+
+### Auto-inject rules into active AI instruction files
+
+```bash
+# Auto-detect spec files (.cursorrules, .clinespec, etc.) and inject rules
+strike-logger inject
+```
+
+### Enable Git Pre-Commit Safeguards
+
+```bash
+# Register the hook so staged diff changes are scanned automatically before git commits
+strike-logger hook --register
+
+# To disable/unregister:
+strike-logger hook --unregister
 ```
 
 ### View statistics
@@ -55,9 +75,11 @@ strike-logger generate --model copilot
 ## 🎯 Features
 
 - **🔍 Auto-Detection**: Automatically scans git history for fix commits
+- **✍️ Interactive Review**: Review commits interactively to toggle strikes, verify diffs, and write custom comments
 - **📊 Smart Categorization**: 17+ predefined error categories with rule-based matching
 - **📈 Rich Reporting**: View strikes by category, severity, and trends
-- **🤖 Multi-Model Support**: Generate templates for GPT, Claude, and Copilot
+- **💉 Spec Injection**: Auto-inject anti-pattern rules directly into `.cursorrules`, `.clinespec`, and other active AI configs
+- **🛡️ Hook Safeguard**: Git pre-commit hook scanning to block new commits containing known recurring bugs
 - **💾 Local Storage**: All data stored locally in JSON (zero telemetry)
 - **🔒 Privacy First**: No external API calls, fully offline
 
@@ -69,6 +91,8 @@ strike-logger generate --model copilot
 | `log` | Log a new strike from commit or manual entry |
 | `report` | View strike statistics and breakdown |
 | `generate` | Generate anti-pattern prompt templates |
+| `inject` | Auto-inject generated anti-pattern rules into active spec files |
+| `hook` | Manage git pre-commit hook safeguard |
 
 ## 🗂️ Strike Categories
 
@@ -165,18 +189,21 @@ strike-logger/
 │   ├── parsers/            # Git diff parsing
 │   ├── categorizer/        # Error categorization
 │   ├── database/           # Strike storage
-│   ├── templates/          # Template generation
-│   └── utils/              # Utilities
+│   ├── templates/          # Template generation and auto-injector
+│   ├── interactive/        # Interactive CLI prompting
+│   └── hooks/              # Git hook registration and staged-diff checking
 ├── data/
 │   └── strikes.json        # Local strike database
-└── templates/
-    └── anti-patterns/      # Pre-built templates
+└── tests/
+    └── strike-logger.test.ts # Vitest unit test suite
 ```
 
 ## 🚀 Roadmap
 
 - [ ] VS Code Extension (real-time strike detection)
 - [ ] Team Dashboard (centralized analytics)
+- [x] Git Hook Pre-Commit Integration
+- [x] Auto-Spec / Prompts rules injection
 - [ ] CI/CD Integration (GitHub Actions)
 - [ ] ML-based categorization
 - [ ] Custom category definitions
