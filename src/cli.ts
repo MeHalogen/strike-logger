@@ -17,7 +17,7 @@ const program = new Command();
 program
   .name('strike-logger')
   .description('AI Code Review Strike Logger - Track and categorize AI-generated code errors')
-  .version('0.2.0');
+  .version('0.2.1');
 
 /**
  * Init command - Initialize strike database
