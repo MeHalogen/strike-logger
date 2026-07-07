@@ -7,7 +7,7 @@ set -e
 echo "🚀 HALONIC - STRIKE LOGGER DEPLOYMENT"
 echo "=========================================="
 echo ""
-echo "Project: Strike Logger v0.1.0"
+echo "Project: Strike Logger v0.3.0"
 echo "Package: @halonic/strike-logger"
 echo ""
 
@@ -24,7 +24,7 @@ if npm whoami &> /dev/null; then
     echo "Publishing..."
     if npm publish --access public > /dev/null 2>&1; then
         echo "✅ Published to npm"
-        echo "   https://www.npmjs.com/package/@halogen-labs/strike-logger"
+        echo "   https://www.npmjs.com/package/@halonic/strike-logger"
     else
         echo "⚠️  Already published or error occurred"
     fi
@@ -47,12 +47,12 @@ if command -v gh &> /dev/null; then
         cd /Users/mehalsrivastava/GitHub/Idea1/strike-logger
         
         # Check if repo already exists
-        if gh repo view halogen-labs/strike-logger > /dev/null 2>&1; then
+        if gh repo view MeHalogen/strike-logger > /dev/null 2>&1; then
             echo "⚠️  Repository already exists"
-            echo "   https://github.com/halogen-labs/strike-logger"
+            echo "   https://github.com/MeHalogen/strike-logger"
         else
             echo "Creating repository..."
-            gh repo create halogen-labs/strike-logger \
+            gh repo create MeHalogen/strike-logger \
                 --public \
                 --source=. \
                 --remote=origin \
@@ -61,12 +61,12 @@ if command -v gh &> /dev/null; then
                 > /dev/null 2>&1
             
             echo "✅ Repository created and pushed"
-            echo "   https://github.com/halogen-labs/strike-logger"
+            echo "   https://github.com/MeHalogen/strike-logger"
             
             echo "Creating release..."
-            gh release create v0.1.0 \
-                --title "Strike Logger v0.1.0" \
-                --notes "🎉 Initial Release
+            gh release create v0.3.0 \
+                --title "Strike Logger v0.3.0" \
+                --notes "🎉 Release
 
 Built by Halonic
 
@@ -75,7 +75,7 @@ Built by Halonic
 npm install -g @halonic/strike-logger
 \`\`\`" > /dev/null 2>&1
             
-            echo "✅ Release v0.1.0 created"
+            echo "✅ Release v0.3.0 created"
         fi
     else
         echo "❌ GitHub CLI not authenticated"
@@ -102,7 +102,7 @@ echo "   npm install -g @halonic/strike-logger"
 echo "   https://www.npmjs.com/package/@halonic/strike-logger"
 echo ""
 echo "🌐 GitHub:"
-echo "   https://github.com/halonic/strike-logger"
+echo "   https://github.com/MeHalogen/strike-logger"
 echo ""
 echo "🚀 Next Steps:"
 echo "   1. Post on Hacker News (Show HN)"

@@ -18,8 +18,8 @@ if npm whoami &> /dev/null; then
     
     # Verify package
     echo "📦 Package details:"
-    echo "  Name: @halogen-labs/strike-logger"
-    echo "  Version: 0.1.0"
+    echo "  Name: @halonic/strike-logger"
+    echo "  Version: 0.3.0"
     echo "  Size: 34.1 kB"
     echo ""
     
@@ -36,13 +36,13 @@ if npm whoami &> /dev/null; then
     echo ""
     echo "🎉 SUCCESS! Package published!"
     echo ""
-    echo "📦 View at: https://www.npmjs.com/package/@halogen-labs/strike-logger"
+    echo "📦 View at: https://www.npmjs.com/package/@halonic/strike-logger"
     echo ""
     echo "Install with:"
-    echo "  npm install -g @halogen-labs/strike-logger"
+    echo "  npm install -g @halonic/strike-logger"
     echo ""
     echo "Or use directly:"
-    echo "  npx @halogen-labs/strike-logger init"
+    echo "  npx @halonic/strike-logger init"
     
 else
     echo "❌ Not logged in to npm"
