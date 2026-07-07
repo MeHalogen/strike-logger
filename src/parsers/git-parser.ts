@@ -111,6 +111,54 @@ export async function getRecentFixCommits(
 }
 
 /**
+ * Concatenate the diffs of every changed file in a commit. Used so
+ * categorization considers the whole commit, not just the first file.
+ */
+export function getCombinedChanges(diffInfo: GitDiffInfo): string {
+  return diffInfo.files.map((f) => f.changes).filter(Boolean).join('\n');
+}
+
+/**
+ * Pick the "primary" file of a commit: the one with the most line changes.
+ * Falls back to the first file, or 'unknown' for empty commits.
+ */
+export function getPrimaryFile(diffInfo: GitDiffInfo): GitFileChange | undefined {
+  if (diffInfo.files.length === 0) return undefined;
+  return [...diffInfo.files].sort(
+    (a, b) => b.additions + b.deletions - (a.additions + a.deletions)
+  )[0];
+}
+
+/**
+ * Extract only the added (`+`) source lines from a unified diff, trimmed.
+ */
+export function extractAddedLines(diff: string): string[] {
+  return diff
+    .split('\n')
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .map((line) => line.substring(1).trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Get the diff between two refs (e.g. for CI: origin/main...HEAD).
+ * Returns an empty string on failure.
+ */
+export async function getRangeDiff(
+  base: string,
+  head: string = 'HEAD',
+  repoPath: string = process.cwd()
+): Promise<string> {
+  try {
+    const git = initGit(repoPath);
+    return await git.diff([`${base}...${head}`]);
+  } catch (error) {
+    console.error(`Failed to diff ${base}...${head}:`, error);
+    return '';
+  }
+}
+
+/**
  * Get current branch name
  */
 export async function getCurrentBranch(repoPath: string = process.cwd()): Promise<string> {

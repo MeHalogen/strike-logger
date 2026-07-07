@@ -35,7 +35,16 @@ export enum StrikeCategory {
   OTHER = 'other'
 }
 
+/**
+ * A category identifier. Built-in categories come from {@link StrikeCategory},
+ * but users may define their own via config, so the stored/handled type is a
+ * plain string.
+ */
+export type CategoryId = StrikeCategory | (string & {});
+
 export type StrikeSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export const SEVERITIES: readonly StrikeSeverity[] = ['low', 'medium', 'high', 'critical'];
 
 /**
  * Individual Strike Entry
@@ -43,20 +52,27 @@ export type StrikeSeverity = 'low' | 'medium' | 'high' | 'critical';
 export interface Strike {
   id: string;
   timestamp: string;
-  category: StrikeCategory;
+  category: CategoryId;
   severity: StrikeSeverity;
   source: {
     commit: string;
     file: string;
     lines: [number, number];
     diff: string;
+    /** Additional files touched by the originating commit (multi-file support). */
+    files?: string[];
   };
   description: string;
   reviewComment?: string;
   aiModel?: string;
   tags: string[];
   resolved: boolean;
+  /** ISO timestamp of when this strike was resolved, if any. */
+  resolvedAt?: string;
 }
+
+/** Current on-disk database schema version. Bump when the shape changes. */
+export const DB_SCHEMA_VERSION = '1.1.0';
 
 /**
  * Strike Database Structure
@@ -72,7 +88,7 @@ export interface StrikeDatabase {
   strikes: Strike[];
   statistics: {
     totalStrikes: number;
-    byCategory: Record<StrikeCategory, number>;
+    byCategory: Record<string, number>;
     bySeverity: Record<StrikeSeverity, number>;
   };
 }
@@ -87,4 +103,28 @@ export interface StrikeLoggerConfig {
   databasePath: string;
   autoLog: boolean;
   categories: StrikeCategory[];
+}
+
+/**
+ * User-supplied rule definition (from a config file). Patterns are provided as
+ * strings and compiled to case-insensitive RegExp at load time.
+ */
+export interface UserRuleDefinition {
+  category: string;
+  keywords?: string[];
+  patterns?: string[];
+  weight?: number;
+}
+
+/**
+ * Shape of an optional `strike-logger.config.json` / `.strikerc.json` file that
+ * lets users extend categorization without touching source.
+ */
+export interface UserConfig {
+  /** Extra categorization rules, merged after the built-ins. */
+  customRules?: UserRuleDefinition[];
+  /** Human-readable labels for custom category ids, used in reports. */
+  categoryLabels?: Record<string, string>;
+  /** Force a severity for specific categories. */
+  severityOverrides?: Record<string, StrikeSeverity>;
 }

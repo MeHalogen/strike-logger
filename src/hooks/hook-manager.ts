@@ -1,9 +1,89 @@
 import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
-import { initGit } from '../parsers/git-parser.js';
+import { initGit, extractAddedLines } from '../parsers/git-parser.js';
 import { getAllStrikes } from '../database/strike-log.js';
-import { CATEGORY_RULES } from '../categorizer/rules.js';
+import { CATEGORY_RULES, CategoryRule } from '../categorizer/rules.js';
+import type { Strike } from '../database/schema.js';
+
+export interface Violation {
+  category: string;
+  line: string;
+  reason: string;
+}
+
+/**
+ * Scan a unified diff for lines that match the anti-pattern rules of the given
+ * active strikes. Pure and side-effect free so it can be reused by the git hook
+ * and the CI command (and unit tested).
+ */
+export function scanDiffForViolations(
+  diff: string,
+  activeStrikes: Strike[],
+  rules: CategoryRule[] = CATEGORY_RULES
+): Violation[] {
+  if (!diff || diff.trim() === '' || activeStrikes.length === 0) {
+    return [];
+  }
+
+  const addedLines = extractAddedLines(diff);
+  if (addedLines.length === 0) return [];
+
+  const activeCategories = new Set(activeStrikes.map((s) => s.category));
+  const activeRules = rules.filter((rule) => activeCategories.has(rule.category));
+  const violations: Violation[] = [];
+
+  for (const line of addedLines) {
+    const lowerLine = line.toLowerCase();
+
+    for (const rule of activeRules) {
+      let matched = false;
+
+      for (const pattern of rule.patterns) {
+        if (pattern.test(lowerLine)) {
+          violations.push({
+            category: String(rule.category),
+            line,
+            reason: `Staged addition matches pattern: ${pattern.toString()}`,
+          });
+          matched = true;
+          break;
+        }
+      }
+
+      // Require >= 2 keywords to reduce noise when no pattern matched.
+      if (matched) continue;
+      const matchingKeywords = rule.keywords.filter((kw) => lowerLine.includes(kw.toLowerCase()));
+      if (matchingKeywords.length >= 2) {
+        violations.push({
+          category: String(rule.category),
+          line,
+          reason: `Staged addition contains category keywords: ${matchingKeywords.join(', ')}`,
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Pretty-print a list of violations to the console.
+ */
+export function printViolations(violations: Violation[], label = '[STRIKE LOGGER] ANTI-PATTERN WARNING'): void {
+  console.log('\n' + chalk.bold.yellow(`⚠️  ${label}`));
+  console.log(chalk.gray(`Detected ${violations.length} potential recurring AI bug(s) in the changes.\n`));
+
+  violations.slice(0, 5).forEach((v, idx) => {
+    console.log(chalk.red(`  [Violation ${idx + 1}] Category: ${v.category}`));
+    console.log(chalk.gray(`    Line:   "${chalk.white(v.line.substring(0, 80))}"`));
+    console.log(chalk.gray(`    Reason: ${v.reason}\n`));
+  });
+
+  if (violations.length > 5) {
+    console.log(chalk.gray(`  ...and ${violations.length - 5} more violations.\n`));
+  }
+}
 
 const HOOK_START = '# STRIKE-LOGGER-HOOK-START';
 const HOOK_END = '# STRIKE-LOGGER-HOOK-END';
@@ -110,7 +190,8 @@ export async function unregisterPreCommitHook(targetDir: string = process.cwd())
  */
 export async function checkStagedChanges(
   dbPath?: string,
-  repoPath: string = process.cwd()
+  repoPath: string = process.cwd(),
+  rules: CategoryRule[] = CATEGORY_RULES
 ): Promise<boolean> {
   try {
     const strikes = await getAllStrikes(dbPath);
@@ -124,69 +205,10 @@ export async function checkStagedChanges(
     // Get staged changes diff
     const stagedDiff = await git.diff(['--cached']);
 
-    if (!stagedDiff || stagedDiff.trim() === '') {
-      return true; // No staged changes
-    }
-
-    // Extract only added lines in diff
-    const addedLines = stagedDiff
-      .split('\n')
-      .filter(line => line.startsWith('+') && !line.startsWith('+++'))
-      .map(line => line.substring(1).trim());
-
-    if (addedLines.length === 0) {
-      return true;
-    }
-
-    const activeCategories = new Set(activeStrikes.map(s => s.category));
-    const violations: { category: string; line: string; reason: string }[] = [];
-
-    // Find rules for active strike categories
-    const activeRules = CATEGORY_RULES.filter(rule => activeCategories.has(rule.category));
-
-    for (const line of addedLines) {
-      const lowerLine = line.toLowerCase();
-      
-      for (const rule of activeRules) {
-        // Check pattern matches
-        for (const pattern of rule.patterns) {
-          if (pattern.test(lowerLine)) {
-            violations.push({
-              category: rule.category,
-              line: line,
-              reason: `Staged addition matches pattern: ${pattern.toString()}`
-            });
-            break;
-          }
-        }
-
-        // Check keyword matches (requiring high confidence to reduce noise)
-        // If the line contains at least two keywords of an active category, flag it
-        const matchingKeywords = rule.keywords.filter(kw => lowerLine.includes(kw.toLowerCase()));
-        if (matchingKeywords.length >= 2) {
-          violations.push({
-            category: rule.category,
-            line: line,
-            reason: `Staged addition contains category keywords: ${matchingKeywords.join(', ')}`
-          });
-        }
-      }
-    }
+    const violations = scanDiffForViolations(stagedDiff, activeStrikes, rules);
 
     if (violations.length > 0) {
-      console.log('\n' + chalk.bold.yellow('⚠️  [STRIKE LOGGER] ANTI-PATTERN WARNING'));
-      console.log(chalk.gray(`Detected potential recurring AI bugs in your staged changes.\n`));
-
-      // Show top 5 violations to keep output readable
-      violations.slice(0, 5).forEach((v, idx) => {
-        console.log(chalk.red(`  [Violation ${idx + 1}] Category: ${v.category}`));
-        console.log(chalk.gray(`    Line:   "${chalk.white(v.line.substring(0, 80))}"`));
-        console.log(chalk.gray(`    Reason: ${v.reason}\n`));
-      });
-
-      if (violations.length > 5) {
-        console.log(chalk.gray(`  ...and ${violations.length - 5} more violations.\n`));
-      }
+      printViolations(violations);
 
       console.log(chalk.bold.yellow('Action Required:'));
       console.log(chalk.gray('  • Review your code to ensure these errors are fixed.'));

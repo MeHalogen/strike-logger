@@ -1,8 +1,9 @@
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
-import type { Strike, StrikeDatabase, StrikeSeverity, StrikeCategory } from './schema.js';
+import type { Strike, StrikeDatabase, StrikeSeverity, CategoryId } from './schema.js';
+import { DB_SCHEMA_VERSION } from './schema.js';
 
 const DEFAULT_DB_PATH = join(process.cwd(), 'data', 'strikes.json');
 
@@ -11,7 +12,7 @@ const DEFAULT_DB_PATH = join(process.cwd(), 'data', 'strikes.json');
  */
 export async function initDatabase(path: string = DEFAULT_DB_PATH): Promise<StrikeDatabase> {
   const db: StrikeDatabase = {
-    version: '1.0.0',
+    version: DB_SCHEMA_VERSION,
     created: new Date().toISOString(),
     lastUpdated: new Date().toISOString(),
     config: {
@@ -21,7 +22,7 @@ export async function initDatabase(path: string = DEFAULT_DB_PATH): Promise<Stri
     strikes: [],
     statistics: {
       totalStrikes: 0,
-      byCategory: {} as Record<StrikeCategory, number>,
+      byCategory: {},
       bySeverity: {
         low: 0,
         medium: 0,
@@ -37,23 +38,64 @@ export async function initDatabase(path: string = DEFAULT_DB_PATH): Promise<Stri
 }
 
 /**
- * Load existing database or create new one
+ * Load existing database or create new one.
+ * Corrupt or partial files are migrated into a valid shape rather than crashing.
  */
 export async function loadDatabase(path: string = DEFAULT_DB_PATH): Promise<StrikeDatabase> {
   if (!existsSync(path)) {
     return initDatabase(path);
   }
 
+  let raw: unknown;
   try {
     const content = await readFile(path, 'utf-8');
-    return JSON.parse(content);
+    raw = JSON.parse(content);
   } catch (error) {
-    throw new Error(`Failed to load database from ${path}: ${error}`);
+    throw new Error(
+      `Database at ${path} is not valid JSON (${(error as Error).message}). ` +
+        `Fix or remove the file, or re-run "strike-logger init".`
+    );
   }
+
+  return migrateDatabase(raw);
 }
 
 /**
- * Save database to disk
+ * Normalize an arbitrary parsed object into a valid {@link StrikeDatabase},
+ * backfilling any missing fields. Keeps older databases working across upgrades.
+ */
+export function migrateDatabase(raw: unknown): StrikeDatabase {
+  const input = (raw && typeof raw === 'object' ? raw : {}) as Partial<StrikeDatabase>;
+  const now = new Date().toISOString();
+
+  const strikes: Strike[] = Array.isArray(input.strikes)
+    ? input.strikes.filter((s): s is Strike => !!s && typeof s === 'object')
+    : [];
+
+  const db: StrikeDatabase = {
+    version: DB_SCHEMA_VERSION,
+    created: typeof input.created === 'string' ? input.created : now,
+    lastUpdated: typeof input.lastUpdated === 'string' ? input.lastUpdated : now,
+    config: {
+      aiModel: input.config?.aiModel ?? 'gpt',
+      severityThreshold: input.config?.severityThreshold ?? 'medium',
+    },
+    strikes,
+    statistics: {
+      totalStrikes: 0,
+      byCategory: {},
+      bySeverity: { low: 0, medium: 0, high: 0, critical: 0 },
+    },
+  };
+
+  // Always recompute statistics so they can never drift out of sync.
+  updateStatistics(db);
+  return db;
+}
+
+/**
+ * Save database to disk atomically (write to a temp file, then rename) so an
+ * interrupted write can never corrupt the existing database.
  */
 export async function saveDatabase(
   db: StrikeDatabase,
@@ -61,7 +103,9 @@ export async function saveDatabase(
 ): Promise<void> {
   db.lastUpdated = new Date().toISOString();
   await ensureDirectory(path);
-  await writeFile(path, JSON.stringify(db, null, 2), 'utf-8');
+  const tmpPath = `${path}.${randomUUID()}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(db, null, 2), 'utf-8');
+  await rename(tmpPath, path);
 }
 
 /**
@@ -98,11 +142,30 @@ export async function getAllStrikes(path: string = DEFAULT_DB_PATH): Promise<Str
  * Get strikes by category
  */
 export async function getStrikesByCategory(
-  category: StrikeCategory,
+  category: CategoryId,
   path: string = DEFAULT_DB_PATH
 ): Promise<Strike[]> {
   const db = await loadDatabase(path);
   return db.strikes.filter((s) => s.category === category);
+}
+
+/**
+ * Find a single strike by full id or unambiguous id prefix (like a git short hash).
+ * Returns `{ strike }` on a unique match, `{ ambiguous: true }` when a prefix
+ * matches several strikes, or `{}` when nothing matches.
+ */
+export async function findStrikeByIdPrefix(
+  idOrPrefix: string,
+  path: string = DEFAULT_DB_PATH
+): Promise<{ strike?: Strike; ambiguous?: boolean; matches?: Strike[] }> {
+  const db = await loadDatabase(path);
+  const exact = db.strikes.find((s) => s.id === idOrPrefix);
+  if (exact) return { strike: exact };
+
+  const matches = db.strikes.filter((s) => s.id.startsWith(idOrPrefix));
+  if (matches.length === 1) return { strike: matches[0] };
+  if (matches.length > 1) return { ambiguous: true, matches };
+  return {};
 }
 
 /**
@@ -131,6 +194,7 @@ export async function resolveStrike(
   }
 
   strike.resolved = true;
+  strike.resolvedAt = new Date().toISOString();
   await saveDatabase(db, path);
   return strike;
 }
@@ -168,9 +232,9 @@ export async function getStatistics(path: string = DEFAULT_DB_PATH): Promise<Str
  */
 function updateStatistics(db: StrikeDatabase): void {
   db.statistics.totalStrikes = db.strikes.length;
-  
+
   // Reset statistics
-  db.statistics.byCategory = {} as Record<StrikeCategory, number>;
+  db.statistics.byCategory = {};
   db.statistics.bySeverity = {
     low: 0,
     medium: 0,
@@ -180,9 +244,11 @@ function updateStatistics(db: StrikeDatabase): void {
 
   // Recalculate
   for (const strike of db.strikes) {
-    db.statistics.byCategory[strike.category] = 
-      (db.statistics.byCategory[strike.category] || 0) + 1;
-    db.statistics.bySeverity[strike.severity]++;
+    const category = strike.category || 'other';
+    db.statistics.byCategory[category] = (db.statistics.byCategory[category] || 0) + 1;
+    if (strike.severity in db.statistics.bySeverity) {
+      db.statistics.bySeverity[strike.severity]++;
+    }
   }
 }
 
